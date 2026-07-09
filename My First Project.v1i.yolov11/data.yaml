@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 3
+names: ['burn', 'crack', 'turbine_blade']
+
+roboflow:
+  workspace: rufus-rj
+  project: my-first-project-oawev
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/rufus-rj/my-first-project-oawev/dataset/1

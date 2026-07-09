@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aircraft Engine Borescope Defect Detection Dashboard</title>
+    <!-- Google Fonts Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="dashboard-wrapper">
+        <!-- Sidebar Navigation / Metadata Config -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="logo-icon">▲</div>
+                <div class="brand-text">
+                    <h2>AeroVision</h2>
+                    <span>Engine Defect Analyzer</span>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>INSPECTION METADATA</h3>
+                <div class="form-group">
+                    <label for="engine-id">Engine Serial ID</label>
+                    <input type="text" id="engine-id" placeholder="e.g. CFM56-7B-89421" value="CFM56-7B-89421">
+                </div>
+                <div class="form-group">
+                    <label for="blade-row">Blade Row / Stage</label>
+                    <input type="text" id="blade-row" placeholder="e.g. HPT Stage 1" value="HPT Stage 1">
+                </div>
+                <div class="form-group">
+                    <label for="inspector">Inspector Name</label>
+                    <input type="text" id="inspector" placeholder="e.g. Sarah Connor" value="Sarah Connor">
+                </div>
+                <div class="form-group">
+                    <label for="inspection-date">Date of Inspection</label>
+                    <input type="date" id="inspection-date">
+                </div>
+                <div class="form-group">
+                    <label for="notes">Notes / Observations</label>
+                    <textarea id="notes" placeholder="Enter findings or notes..." rows="3">Standard borescope review of High Pressure Turbine stage 1 blades. Minor surface discolorations noted.</textarea>
+                </div>
+            </div>
+
+            <div class="status-panel">
+                <div class="status-indicator">
+                    <span class="pulse-dot green" id="server-status-dot"></span>
+                    <span class="status-text" id="server-status-text">Server: Online</span>
+                </div>
+                <div class="status-indicator">
+                    <span class="pulse-dot orange" id="model-status-dot"></span>
+                    <span class="status-text" id="model-status-text">Model: Loading...</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Dashboard Content -->
+        <main class="main-content">
+            <header class="top-nav">
+                <h1>HPT Turbine Blade Inspection Dashboard</h1>
+                <div class="header-actions">
+                    <button class="btn btn-secondary" id="load-test-btn">Load Demo Image</button>
+                </div>
+            </header>
+
+            <div class="scroll-area">
+                <!-- Dropzone / Upload Panel -->
+                <section class="card upload-section" id="upload-panel">
+                    <div class="drag-drop-zone" id="drop-zone">
+                        <input type="file" id="file-input" accept="image/*" style="display: none;">
+                        <div class="upload-icon">📁</div>
+                        <h3>Upload Borescope Image</h3>
+                        <p>Drag and drop your inspection image here, or <strong>browse files</strong></p>
+                        <span class="format-hint">Supports JPG, PNG, WEBP (Max 15MB)</span>
+                    </div>
+                </section>
+
+                <!-- Processing Spinner -->
+                <section class="processing-card hidden" id="processing-panel">
+                    <div class="spinner"></div>
+                    <h2>Analyzing Image with YOLO11 Segment</h2>
+                    <p>Detecting turbine blades, identifying cracks and burns, and computing defect metrics...</p>
+                </section>
+
+                <!-- Results & Analysis Panel -->
+                <div class="hidden" id="results-panel">
+                    <div class="results-grid">
+                        <!-- Left: Visual Comparison Card -->
+                        <section class="card viewer-card">
+                            <div class="card-header">
+                                <h3>Instance Segmentation Output</h3>
+                                <div class="badge-row">
+                                    <span class="color-badge blade-badge">Blade Outline</span>
+                                    <span class="color-badge crack-badge">Crack Defect</span>
+                                    <span class="color-badge burn-badge">Burn Defect</span>
+                                </div>
+                            </div>
+                            <div class="images-container">
+                                <div class="image-box">
+                                    <span class="img-label">Original Image</span>
+                                    <img id="original-preview" src="" alt="Original Upload">
+                                </div>
+                                <div class="image-box">
+                                    <span class="img-label">Annotated Output</span>
+                                    <img id="annotated-preview" src="" alt="Annotated Detections">
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Right: Severity & Diagnostics -->
+                        <section class="card summary-card">
+                            <div class="card-header">
+                                <h3>Inspection Diagnostics</h3>
+                                <div id="overall-status-badge" class="status-badge passed">PASSED</div>
+                            </div>
+                            
+                            <div class="metrics-summary">
+                                <div class="metric-box">
+                                    <span class="metric-val" id="count-blades">0</span>
+                                    <span class="metric-lbl">Blades Detected</span>
+                                </div>
+                                <div class="metric-box">
+                                    <span class="metric-val" id="count-cracks">0</span>
+                                    <span class="metric-lbl">Cracks Found</span>
+                                </div>
+                                <div class="metric-box">
+                                    <span class="metric-val" id="count-burns">0</span>
+                                    <span class="metric-lbl">Burns Found</span>
+                                </div>
+                            </div>
+
+                            <div class="defect-breakdown">
+                                <h4>Defect Breakdown per Blade</h4>
+                                <div class="table-wrapper">
+                                    <table class="report-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Blade ID</th>
+                                                <th>Defect Type</th>
+                                                <th>Compromised Area</th>
+                                                <th>Severity</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="defect-table-body">
+                                            <!-- Dynamically generated rows -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div class="card-actions">
+                                <button class="btn btn-primary" id="print-report-btn">🖨️ Print Inspection Report</button>
+                                <button class="btn btn-secondary" id="reset-btn">Upload Another Image</button>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Print Report Template (Hidden in Normal View, Visible in Print) -->
+    <div id="print-report-template" class="print-only">
+        <div class="print-header">
+            <div class="print-brand">AeroVision Turbine Engine Diagnostics</div>
+            <h1>Borescope Inspection Report</h1>
+            <div class="print-meta-grid">
+                <div><strong>Engine Serial ID:</strong> <span id="p-engine-id"></span></div>
+                <div><strong>Blade Row / Stage:</strong> <span id="p-blade-row"></span></div>
+                <div><strong>Inspector Name:</strong> <span id="p-inspector"></span></div>
+                <div><strong>Inspection Date:</strong> <span id="p-date"></span></div>
+                <div><strong>Overall Status:</strong> <span id="p-status"></span></div>
+                <div><strong>Report ID:</strong> <span id="p-report-id"></span></div>
+            </div>
+        </div>
+
+        <div class="print-image-section">
+            <div class="print-image-box">
+                <h4>Original Borescope Image</h4>
+                <img id="print-orig-img" src="" alt="Original Borescope Image">
+            </div>
+            <div class="print-image-box">
+                <h4>Annotated Defect Segmentation Map</h4>
+                <img id="print-ann-img" src="" alt="Annotated Borescope Image">
+            </div>
+        </div>
+
+        <div class="print-data-section">
+            <h3>Inspection Summary</h3>
+            <table class="print-table">
+                <thead>
+                    <tr>
+                        <th>Blade ID</th>
+                        <th>Status</th>
+                        <th>Defect Count</th>
+                        <th>Associated Defects & Severity</th>
+                    </tr>
+                </thead>
+                <tbody id="print-table-body">
+                    <!-- Dynamically populated -->
+                </tbody>
+            </table>
+        </div>
+
+        <div class="print-notes-section">
+            <h3>Inspector Notes</h3>
+            <p id="p-notes"></p>
+        </div>
+
+        <div class="print-footer">
+            <p>AeroVision Inspection Software. Generated automatically via YOLO11 Segment. Authorized digital copy.</p>
+            <div class="signature-line">
+                <div class="line"></div>
+                <span>Inspector Signature</span>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/app.js"></script>
+</body>
+</html>
