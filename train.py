@@ -6,7 +6,7 @@ import torch
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train YOLO11 Instance Segmentation on Turbine Blade Defects")
-    parser.add_argument("--data", type=str, default="dataset/data.yaml", help="Path to data.yaml file")
+    parser.add_argument("--data", type=str, default="My First Project.v1i.yolov11/data.yaml", help="Path to data.yaml file")
     parser.add_argument("--model", type=str, default="yolo11n-seg.pt", help="Pretrained model weights (e.g., yolo11n-seg.pt, yolo11s-seg.pt)")
     parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
     parser.add_argument("--batch", type=int, default=16, help="Batch size (use -1 for auto-batching)")
@@ -61,7 +61,20 @@ def main():
             project=args.project,
             name=args.name,
             exist_ok=True,
-            plots=True  # Generates training validation plots automatically
+            plots=True,  # Generates training validation plots automatically
+            # --- Data Augmentation Parameters ---
+            degrees=15.0,      # Rotate image (+/- 15 degrees)
+            translate=0.1,     # Translate image (+/- 10%)
+            scale=0.5,         # Scale image (+/- 50%)
+            shear=2.0,         # Shear image (+/- 2 degrees)
+            flipud=0.5,        # Flip image up-down (50% probability)
+            fliplr=0.5,        # Flip image left-right (50% probability)
+            mosaic=1.0,        # Mosaic augmentation (combine 4 images, 100% probability)
+            mixup=0.15,        # Mixup augmentation (blend two images, 15% probability)
+            copy_paste=0.3,    # Copy-paste segment objects (30% probability, excellent for segmentation)
+            hsv_h=0.015,       # HSV hue adjustment fraction
+            hsv_s=0.7,         # HSV saturation adjustment fraction
+            hsv_v=0.4          # HSV value (brightness) adjustment fraction
         )
         print("\n" + "="*50)
         print("TRAINING COMPLETED SUCCESSFULLY!")

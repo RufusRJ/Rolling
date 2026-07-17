@@ -27,12 +27,23 @@ app.add_middleware(
 UPLOAD_DIR = Path("static/uploads")
 RESULT_DIR = Path("static/results")
 
-# Ensure folders exist
+# Ensure folders exist and are clean on startup
+if UPLOAD_DIR.exists():
+    for f in UPLOAD_DIR.glob("*"):
+        try:
+            if f.is_file(): f.unlink()
+        except Exception: pass
+if RESULT_DIR.exists():
+    for f in RESULT_DIR.glob("*"):
+        try:
+            if f.is_file(): f.unlink()
+        except Exception: pass
+
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
 
 # YOLO11 Class details
-CLASS_NAMES = {0: "turbine_blade", 1: "crack", 2: "burn"}
+CLASS_NAMES = {0: "burn", 1: "crack", 2: "turbine_blade"}
 COLORS = {
     "turbine_blade": (255, 120, 0),  # Steel Blue (BGR)
     "crack": (0, 0, 255),           # Neon Red (BGR)

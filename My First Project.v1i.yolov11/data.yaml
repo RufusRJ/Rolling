@@ -1,6 +1,7 @@
-train: ../train/images
-val: ../valid/images
-test: ../test/images
+path: 'c:/Users/ADMIN/Desktop/Rolling/My First Project.v1i.yolov11'
+train: train/images
+val: valid/images
+test: test/images
 
 nc: 3
 names: ['burn', 'crack', 'turbine_blade']
