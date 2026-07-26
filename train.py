@@ -17,6 +17,69 @@ def parse_args():
     parser.add_argument("--name", type=str, default="train_turbine_defects", help="Experiment name")
     return parser.parse_args()
 
+def apply_grayscale_augmentation(data_yaml_path):
+    from pathlib import Path
+    import cv2
+    import shutil
+
+    dataset_root = Path(data_yaml_path).parent.resolve()
+    
+    # We will process train and valid directories
+    splits = [
+        ("train", dataset_root / "train"),
+        ("valid", dataset_root / "valid")
+    ]
+
+    print("\nPreparing dataset with grayscale augmentation...")
+    for split_name, split_path in splits:
+        img_dir = split_path / "images"
+        lbl_dir = split_path / "labels"
+
+        if not img_dir.exists() or not lbl_dir.exists():
+            print(f"  Skipping '{split_name}' (directories not found).")
+            continue
+
+        img_files = [f for f in img_dir.iterdir() if f.is_file() and f.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp"]]
+        
+        augmented_count = 0
+        skipped_count = 0
+        
+        for img_file in img_files:
+            # Skip already augmented files to avoid loop duplication
+            if img_file.stem.endswith("_gray"):
+                skipped_count += 1
+                continue
+                
+            gray_img_name = f"{img_file.stem}_gray{img_file.suffix}"
+            gray_img_path = img_dir / gray_img_name
+            
+            # Skip if already exists on disk
+            if gray_img_path.exists():
+                skipped_count += 1
+                continue
+
+            img = cv2.imread(str(img_file))
+            if img is None:
+                continue
+                
+            # Convert to grayscale and keep 3 channels (fake RGB)
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            gray_3ch = cv2.merge([gray, gray, gray])
+            
+            # Save the image
+            cv2.imwrite(str(gray_img_path), gray_3ch)
+            
+            # Copy corresponding label file
+            lbl_file = lbl_dir / f"{img_file.stem}.txt"
+            if lbl_file.exists():
+                gray_lbl_path = lbl_dir / f"{img_file.stem}_gray.txt"
+                shutil.copy2(lbl_file, gray_lbl_path)
+                
+            augmented_count += 1
+            
+        print(f"  Split '{split_name}': created {augmented_count} grayscale augmented images (skipped {skipped_count} existing).")
+    print("Dataset preparation complete!\n")
+
 def main():
     args = parse_args()
     
@@ -28,6 +91,9 @@ def main():
         sys.exit(1)
         
     print(f"Using dataset config: {data_path}")
+    
+    # Run grayscale augmentation on dataset
+    apply_grayscale_augmentation(data_path)
     
     # 2. Select Device
     if args.device is None:

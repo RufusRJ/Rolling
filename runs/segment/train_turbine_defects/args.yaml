@@ -5,13 +5,13 @@ data: C:\Users\ADMIN\Desktop\Rolling\My First Project.v1i.yolov11\data.yaml
 epochs: 100
 time: null
 patience: 100
-batch: 4
+batch: 16
 imgsz: 640
 save: true
 save_period: -1
 cache: false
 device: cpu
-workers: 0
+workers: 8
 project: runs/segment
 name: train_turbine_defects
 exist_ok: true
