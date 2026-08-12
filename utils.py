@@ -76,10 +76,23 @@ def draw_overlays(img, blades, defects, unassociated_defects, colors):
     cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
     return img
 
-def analyze_detections(boxes, masks, class_names, colors, width, height):
+def convert_physical_metrics(mm_val, unit="mm", is_area=False):
+    """
+    Converts values from mm (or mm²) to target unit.
+    """
+    if unit == "cm":
+        return mm_val / 10.0 if not is_area else mm_val / 100.0
+    elif unit == "m":
+        return mm_val / 1000.0 if not is_area else mm_val / 1_000_000.0
+    # default is "mm"
+    return mm_val
+
+def analyze_detections(boxes, masks, class_names, colors, width, height,
+                       calibration_method="known_blade", known_blade_height=100.0,
+                       fixed_scale=0.25, target_unit="mm"):
     """
     Performs spatial analysis to group cracks/burns with corresponding turbine blades.
-    Calculates defect areas, compromised percentages, and severity.
+    Calculates defect areas, compromised percentages, severity, and physical metrics.
     """
     blades = []
     defects = []
@@ -129,7 +142,21 @@ def analyze_detections(boxes, masks, class_names, colors, width, height):
             elif label in ["crack", "burn"]:
                 defects.append(det_info)
                 
-    # Spatial grouping
+    # Calculate scale factor for each blade
+    for b in blades:
+        if calibration_method == "known_blade":
+            box_height = b["box"][3] - b["box"][1]
+            b["scale_factor"] = known_blade_height / box_height if box_height > 0 else fixed_scale
+        else:
+            b["scale_factor"] = fixed_scale
+
+    # Global scale factor for unassociated defects or fallback
+    if blades:
+        avg_scale = float(np.mean([b["scale_factor"] for b in blades]))
+    else:
+        avg_scale = fixed_scale
+
+    # Spatial grouping & scale association
     unassociated_defects = []
     for d in defects:
         best_blade = None
@@ -144,17 +171,37 @@ def analyze_detections(boxes, masks, class_names, colors, width, height):
         if best_blade is not None and max_overlap > 0.10:
             d["blade_id"] = best_blade["id"]
             d["percent_compromised"] = (d["area_pixels"] / best_blade["area_pixels"]) * 100 if best_blade["area_pixels"] > 0 else 0
+            d["scale_factor"] = best_blade["scale_factor"]
             best_blade["defects"].append(d)
         else:
             unassociated_defects.append(d)
-            
+            d["scale_factor"] = avg_scale
+
+    # Compute physical metrics
+    for b in blades:
+        scale = b["scale_factor"]
+        area_mm2 = b["area_pixels"] * (scale ** 2)
+        b["area_physical"] = convert_physical_metrics(area_mm2, target_unit, is_area=True)
+        b["height_physical"] = convert_physical_metrics((b["box"][3] - b["box"][1]) * scale, target_unit, is_area=False)
+
+    for d in defects + unassociated_defects:
+        scale = d["scale_factor"]
+        area_mm2 = d["area_pixels"] * (scale ** 2)
+        d["area_physical"] = convert_physical_metrics(area_mm2, target_unit, is_area=True)
+        
+        dx = d["box"][2] - d["box"][0]
+        dy = d["box"][3] - d["box"][1]
+        d["max_dim_physical"] = convert_physical_metrics(max(dx, dy) * scale, target_unit, is_area=False)
+
     # Compile summary report dict
     summary = {
         "total_blades": len(blades),
         "total_defects": len(defects),
         "cracks_count": sum(1 for d in defects if d["label"] == "crack"),
         "burns_count": sum(1 for d in defects if d["label"] == "burn"),
-        "blades": []
+        "blades": [],
+        "area_unit": f"{target_unit}²",
+        "length_unit": target_unit
     }
     
     for b in blades:
@@ -173,6 +220,8 @@ def analyze_detections(boxes, masks, class_names, colors, width, height):
                 "type": d["label"],
                 "confidence": d["confidence"],
                 "area_pixels": round(d["area_pixels"], 1),
+                "area_physical": round(d["area_physical"], 4),
+                "max_dim_physical": round(d["max_dim_physical"], 2),
                 "percent_compromised": round(d["percent_compromised"], 2),
                 "severity": severity
             })
@@ -182,9 +231,12 @@ def analyze_detections(boxes, masks, class_names, colors, width, height):
             "confidence": b["confidence"],
             "box": [round(c, 1) for c in b["box"]],
             "area_pixels": round(b["area_pixels"], 1),
+            "area_physical": round(b["area_physical"], 2),
+            "height_physical": round(b["height_physical"], 2),
             "defects": blade_defects,
             "defect_count": len(blade_defects),
-            "status": "Failed" if any(sd["severity"] == "High" for sd in blade_defects) else ("Action Required" if len(blade_defects) > 0 else "Passed")
+            "status": "Failed" if any(sd["severity"] == "High" for sd in blade_defects) else ("Action Required" if len(blade_defects) > 0 else "Passed"),
+            "scale_factor": round(b["scale_factor"], 4)
         })
         
     if unassociated_defects:
@@ -194,12 +246,14 @@ def analyze_detections(boxes, masks, class_names, colors, width, height):
                 "defect_id": d["id"],
                 "type": d["label"],
                 "confidence": d["confidence"],
-                "area_pixels": round(d["area_pixels"], 1)
+                "area_pixels": round(d["area_pixels"], 1),
+                "area_physical": round(d["area_physical"], 4),
+                "max_dim_physical": round(d["max_dim_physical"], 2)
             })
             
     return summary, blades, defects, unassociated_defects
 
-def run_mock_inference(img, colors):
+def run_mock_inference(img, colors, calibration_method="known_blade", known_blade_height=100.0, fixed_scale=0.25, target_unit="mm"):
     """
     Simulates predictions on an image to allow testing the UI without a trained model weights file.
     Detects 3 blades, a crack on blade 0, and a burn on blade 1.
@@ -238,7 +292,19 @@ def run_mock_inference(img, colors):
         "area_pixels": get_polygon_area(burn_poly), "blade_id": 1, "percent_compromised": 0.0
     }
     
-    # Associate
+    # Associate & Scale Factors
+    for b in blades:
+        if calibration_method == "known_blade":
+            box_height = b["box"][3] - b["box"][1]
+            b["scale_factor"] = known_blade_height / box_height if box_height > 0 else fixed_scale
+        else:
+            b["scale_factor"] = fixed_scale
+            
+    avg_scale = float(np.mean([b["scale_factor"] for b in blades]))
+    
+    crack["scale_factor"] = blades[0]["scale_factor"]
+    burn["scale_factor"] = blades[1]["scale_factor"]
+
     crack["percent_compromised"] = (crack["area_pixels"] / blades[0]["area_pixels"]) * 100
     blades[0]["defects"].append(crack)
     
@@ -248,6 +314,22 @@ def run_mock_inference(img, colors):
     defects = [crack, burn]
     unassociated = []
     
+    # Compute physical metrics
+    for b in blades:
+        scale = b["scale_factor"]
+        area_mm2 = b["area_pixels"] * (scale ** 2)
+        b["area_physical"] = convert_physical_metrics(area_mm2, target_unit, is_area=True)
+        b["height_physical"] = convert_physical_metrics((b["box"][3] - b["box"][1]) * scale, target_unit, is_area=False)
+
+    for d in defects:
+        scale = d["scale_factor"]
+        area_mm2 = d["area_pixels"] * (scale ** 2)
+        d["area_physical"] = convert_physical_metrics(area_mm2, target_unit, is_area=True)
+        
+        dx = d["box"][2] - d["box"][0]
+        dy = d["box"][3] - d["box"][1]
+        d["max_dim_physical"] = convert_physical_metrics(max(dx, dy) * scale, target_unit, is_area=False)
+
     # Create overlays
     annotated_img = draw_overlays(img, blades, defects, unassociated, colors)
     
@@ -258,7 +340,9 @@ def run_mock_inference(img, colors):
         "cracks_count": 1,
         "burns_count": 1,
         "blades": [],
-        "is_mock": True # Indicator that the server ran in demo mode
+        "is_mock": True, # Indicator that the server ran in demo mode
+        "area_unit": f"{target_unit}²",
+        "length_unit": target_unit
     }
     
     for b in blades:
@@ -276,6 +360,8 @@ def run_mock_inference(img, colors):
                 "type": d["label"],
                 "confidence": d["confidence"],
                 "area_pixels": round(d["area_pixels"], 1),
+                "area_physical": round(d["area_physical"], 4),
+                "max_dim_physical": round(d["max_dim_physical"], 2),
                 "percent_compromised": round(d["percent_compromised"], 2),
                 "severity": severity
             })
@@ -285,9 +371,12 @@ def run_mock_inference(img, colors):
             "confidence": b["confidence"],
             "box": [round(c, 1) for c in b["box"]],
             "area_pixels": round(b["area_pixels"], 1),
+            "area_physical": round(b["area_physical"], 2),
+            "height_physical": round(b["height_physical"], 2),
             "defects": blade_defects,
             "defect_count": len(blade_defects),
-            "status": "Failed" if any(sd["severity"] == "High" for sd in blade_defects) else ("Action Required" if len(blade_defects) > 0 else "Passed")
+            "status": "Failed" if any(sd["severity"] == "High" for sd in blade_defects) else ("Action Required" if len(blade_defects) > 0 else "Passed"),
+            "scale_factor": round(b["scale_factor"], 4)
         })
         
     return summary, annotated_img

@@ -25,6 +25,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const countCracksEl = document.getElementById("count-cracks");
     const countBurnsEl = document.getElementById("count-burns");
     const defectTableBody = document.getElementById("defect-table-body");
+
+    // Calibration UI Elements
+    const calibrationMethod = document.getElementById("calibration-method");
+    const groupBladeHeight = document.getElementById("group-blade-height");
+    const groupFixedScale = document.getElementById("group-fixed-scale");
+    const knownBladeHeightInput = document.getElementById("known-blade-height");
+    const fixedScaleValInput = document.getElementById("fixed-scale-val");
+    const targetUnitSelect = document.getElementById("target-unit");
     
     // Variables
     let lastAnalysisResults = null;
@@ -37,6 +45,22 @@ document.addEventListener("DOMContentLoaded", () => {
     // Set server status to online since JavaScript is running
     serverStatusText.textContent = "Server: Online";
     serverStatusDot.className = "pulse-dot green";
+
+    // Setup Calibration Events
+    calibrationMethod.addEventListener("change", () => {
+        if (calibrationMethod.value === "known_blade") {
+            groupBladeHeight.classList.remove("hidden");
+            groupFixedScale.classList.add("hidden");
+        } else {
+            groupBladeHeight.classList.add("hidden");
+            groupFixedScale.classList.remove("hidden");
+        }
+        recalculateAndRender();
+    });
+
+    knownBladeHeightInput.addEventListener("input", recalculateAndRender);
+    fixedScaleValInput.addEventListener("input", recalculateAndRender);
+    targetUnitSelect.addEventListener("change", recalculateAndRender);
 
     // 1. Drag and Drop Handlers
     dropZone.addEventListener("click", () => fileInput.click());
@@ -73,6 +97,10 @@ document.addEventListener("DOMContentLoaded", () => {
     async function handleFileUpload(file) {
         const formData = new FormData();
         formData.append("file", file);
+        formData.append("calibration_method", calibrationMethod.value);
+        formData.append("known_blade_height", knownBladeHeightInput.value);
+        formData.append("fixed_scale", fixedScaleValInput.value);
+        formData.append("target_unit", targetUnitSelect.value);
 
         // Show processing loader
         uploadPanel.classList.add("hidden");
@@ -149,7 +177,50 @@ document.addEventListener("DOMContentLoaded", () => {
             overallStatusBadge.className = "status-badge passed";
         }
 
-        // Populate Table
+        // Render current calibration
+        recalculateAndRender();
+    }
+
+    // Convert mm to physical unit
+    function convertPhysical(mmVal, unit, isArea) {
+        if (unit === "cm") {
+            return isArea ? mmVal / 100.0 : mmVal / 10.0;
+        } else if (unit === "m") {
+            return isArea ? mmVal / 1000000.0 : mmVal / 1000.0;
+        }
+        return mmVal; // default mm
+    }
+
+    function recalculateAndRender() {
+        if (!lastAnalysisResults) return;
+
+        const data = lastAnalysisResults;
+        const calibMethod = calibrationMethod.value;
+        const knownBladeHeight = parseFloat(knownBladeHeightInput.value) || 100.0;
+        const fixedScale = parseFloat(fixedScaleValInput.value) || 0.25;
+        const unit = targetUnitSelect.value;
+        const areaUnit = unit + "²";
+        const lengthUnit = unit;
+
+        // 1. Compute scale factor for each blade
+        let bladesScale = {};
+        let scaleSum = 0;
+        let bladesCount = 0;
+
+        data.blades.forEach(b => {
+            let scale = fixedScale;
+            if (calibMethod === "known_blade") {
+                const boxHeight = b.box[3] - b.box[1];
+                scale = boxHeight > 0 ? knownBladeHeight / boxHeight : fixedScale;
+            }
+            bladesScale[b.blade_id] = scale;
+            scaleSum += scale;
+            bladesCount++;
+        });
+
+        const avgScale = bladesCount > 0 ? (scaleSum / bladesCount) : fixedScale;
+
+        // 2. Populate Table
         defectTableBody.innerHTML = "";
         
         if (data.blades.length === 0) {
@@ -157,31 +228,50 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        let defectRowsAdded = false;
-
         data.blades.forEach(blade => {
+            const bScale = bladesScale[blade.blade_id];
+            const bladeAreaMM = blade.area_pixels * (bScale ** 2);
+            const physicalBladeArea = convertPhysical(bladeAreaMM, unit, true);
+
             if (blade.defects.length === 0) {
                 const row = document.createElement("tr");
                 row.innerHTML = `
                     <td>Blade #${blade.blade_id}</td>
-                    <td style="color: var(--color-accent-green);">No defects</td>
-                    <td>0 px</td>
+                    <td style="color: var(--color-accent-green); font-weight: 500;">No defects</td>
+                    <td>
+                        <span style="font-size: 0.85em; color: var(--color-muted);">
+                            Blade Area: ${physicalBladeArea.toFixed(1)} ${areaUnit}
+                        </span>
+                    </td>
                     <td><span class="severity-pill low">None</span></td>
                 `;
                 defectTableBody.appendChild(row);
-                defectRowsAdded = true;
             } else {
                 blade.defects.forEach(defect => {
                     const row = document.createElement("tr");
                     const sevClass = defect.severity.toLowerCase();
+                    
+                    const defectAreaMM = defect.area_pixels * (bScale ** 2);
+                    const physicalDefectArea = convertPhysical(defectAreaMM, unit, true);
+                    
+                    const dx = defect.box[2] - defect.box[0];
+                    const dy = defect.box[3] - defect.box[1];
+                    const maxDimPx = Math.max(dx, dy);
+                    const physicalMaxDim = convertPhysical(maxDimPx * bScale, unit, false);
+
                     row.innerHTML = `
                         <td>Blade #${blade.blade_id}</td>
                         <td style="text-transform: capitalize; font-weight: 500;">${defect.type}</td>
-                        <td>${defect.percent_compromised}% (${defect.area_pixels} px)</td>
+                        <td>
+                            <div><strong>${defect.percent_compromised}%</strong> of area</div>
+                            <div style="font-size: 0.85em; color: var(--color-muted); margin-top: 2px; line-height: 1.3;">
+                                Area: ${physicalDefectArea.toFixed(3)} ${areaUnit} <span style="font-size:0.9em;color:var(--color-muted);">(${defect.area_pixels} px)</span><br>
+                                Max Dim: ${physicalMaxDim.toFixed(2)} ${lengthUnit}
+                            </div>
+                        </td>
                         <td><span class="severity-pill ${sevClass}">${defect.severity}</span></td>
                     `;
                     defectTableBody.appendChild(row);
-                    defectRowsAdded = true;
                 });
             }
         });
@@ -189,15 +279,27 @@ document.addEventListener("DOMContentLoaded", () => {
         // Add unassociated defects if any
         if (data.unassociated_defects && data.unassociated_defects.length > 0) {
             data.unassociated_defects.forEach(defect => {
+                const defectAreaMM = defect.area_pixels * (avgScale ** 2);
+                const physicalDefectArea = convertPhysical(defectAreaMM, unit, true);
+                
+                const dx = defect.box[2] - defect.box[0];
+                const dy = defect.box[3] - defect.box[1];
+                const maxDimPx = Math.max(dx, dy);
+                const physicalMaxDim = convertPhysical(maxDimPx * avgScale, unit, false);
+
                 const row = document.createElement("tr");
                 row.innerHTML = `
                     <td style="color: var(--color-muted);">Unassociated</td>
                     <td style="text-transform: capitalize; font-weight: 500; color: var(--color-muted);">${defect.type}</td>
-                    <td>${defect.area_pixels} px</td>
+                    <td>
+                        <div style="font-size: 0.85em; color: var(--color-muted); line-height: 1.3;">
+                            Area: ${physicalDefectArea.toFixed(3)} ${areaUnit} <span style="font-size:0.9em;color:var(--color-muted);">(${defect.area_pixels} px)</span><br>
+                            Max Dim: ${physicalMaxDim.toFixed(2)} ${lengthUnit}
+                        </div>
+                    </td>
                     <td><span class="severity-pill medium">Medium</span></td>
                 `;
                 defectTableBody.appendChild(row);
-                defectRowsAdded = true;
             });
         }
     }
@@ -267,18 +369,44 @@ document.addEventListener("DOMContentLoaded", () => {
         printOrig.src = lastAnalysisResults.original_url;
         printAnn.src = lastAnalysisResults.result_url;
 
+        // Calibration values
+        const calibMethod = calibrationMethod.value;
+        const knownBladeHeight = parseFloat(knownBladeHeightInput.value) || 100.0;
+        const fixedScale = parseFloat(fixedScaleValInput.value) || 0.25;
+        const unit = targetUnitSelect.value;
+        const areaUnit = unit + "²";
+        const lengthUnit = unit;
+
+        let bladesScale = {};
+        lastAnalysisResults.blades.forEach(b => {
+            let scale = fixedScale;
+            if (calibMethod === "known_blade") {
+                const boxHeight = b.box[3] - b.box[1];
+                scale = boxHeight > 0 ? knownBladeHeight / boxHeight : fixedScale;
+            }
+            bladesScale[b.blade_id] = scale;
+        });
+
         // Populate Print Table Body
         const printTableBody = document.getElementById("print-table-body");
         printTableBody.innerHTML = "";
 
         lastAnalysisResults.blades.forEach(blade => {
+            const bScale = bladesScale[blade.blade_id];
             const tr = document.createElement("tr");
             let defectSummaryText = "Clear (No defects detected)";
             
             if (blade.defects.length > 0) {
-                defectSummaryText = blade.defects.map(d => 
-                    `${d.type.toUpperCase()} (${d.severity} Severity): compromised ${d.percent_compromised}% of area`
-                ).join("<br>");
+                defectSummaryText = blade.defects.map(d => {
+                    const defectAreaMM = d.area_pixels * (bScale ** 2);
+                    const physicalDefectArea = convertPhysical(defectAreaMM, unit, true);
+                    
+                    const dx = d.box[2] - d.box[0];
+                    const dy = d.box[3] - d.box[1];
+                    const physicalMaxDim = convertPhysical(Math.max(dx, dy) * bScale, unit, false);
+
+                    return `${d.type.toUpperCase()} (${d.severity} Severity): compromised ${d.percent_compromised}% of area (${physicalDefectArea.toFixed(3)} ${areaUnit}, max dim: ${physicalMaxDim.toFixed(2)} ${lengthUnit})`;
+                }).join("<br>");
             }
 
             tr.innerHTML = `

@@ -46,6 +46,33 @@
                 </div>
             </div>
 
+            <div class="sidebar-section">
+                <h3>METRIC CALIBRATION</h3>
+                <div class="form-group">
+                    <label for="calibration-method">Calibration Method</label>
+                    <select id="calibration-method">
+                        <option value="known_blade" selected>Known Blade Reference</option>
+                        <option value="fixed_scale">Fixed Spatial Resolution</option>
+                    </select>
+                </div>
+                <div class="form-group" id="group-blade-height">
+                    <label for="known-blade-height">Known Blade Height (mm)</label>
+                    <input type="number" id="known-blade-height" value="100" min="1" step="1">
+                </div>
+                <div class="form-group hidden" id="group-fixed-scale">
+                    <label for="fixed-scale-val">Spatial Scale (mm/pixel)</label>
+                    <input type="number" id="fixed-scale-val" value="0.25" min="0.001" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label for="target-unit">Display Unit</label>
+                    <select id="target-unit">
+                        <option value="mm" selected>Millimeters (mm, mm²)</option>
+                        <option value="cm">Centimeters (cm, cm²)</option>
+                        <option value="m">Meters (m, m²)</option>
+                    </select>
+                </div>
+            </div>
+
             <div class="status-panel">
                 <div class="status-indicator">
                     <span class="pulse-dot green" id="server-status-dot"></span>

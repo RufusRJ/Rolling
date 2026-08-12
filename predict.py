@@ -6,7 +6,7 @@ from ultralytics import YOLO
 import utils
 
 # Class configuration
-CLASS_NAMES = {0: "turbine_blade", 1: "crack", 2: "burn"}
+CLASS_NAMES = {0: "burn", 1: "crack", 2: "turbine_blade"}
 COLORS = {
     "turbine_blade": (255, 120, 0),  # Steel Blue
     "crack": (0, 0, 255),           # Neon Red
@@ -19,6 +19,10 @@ def parse_args():
     parser.add_argument("--model", type=str, default=None, help="Path to custom YOLO11 model weights (e.g. best.pt)")
     parser.add_argument("--output", type=str, default="output_annotated.jpg", help="Path to save annotated image")
     parser.add_argument("--conf", type=float, default=0.25, help="Confidence threshold")
+    parser.add_argument("--calib-method", type=str, choices=["known_blade", "fixed_scale"], default="known_blade", help="Calibration method: known_blade or fixed_scale")
+    parser.add_argument("--blade-height", type=float, default=100.0, help="Physical height of turbine blade in millimeters (used for known_blade method)")
+    parser.add_argument("--fixed-scale", type=float, default=0.25, help="Fixed spatial resolution scale in mm/pixel (used for fixed_scale method)")
+    parser.add_argument("--unit", type=str, choices=["mm", "cm", "m"], default="mm", help="Target display units")
     return parser.parse_args()
 
 def main():
@@ -60,7 +64,13 @@ def main():
         print("To run actual inference, train your model or supply --model path/to/weights.pt.")
         print("="*60 + "\n")
         
-        metrics, annotated_img = utils.run_mock_inference(img, COLORS)
+        metrics, annotated_img = utils.run_mock_inference(
+            img, COLORS,
+            calibration_method=args.calib_method,
+            known_blade_height=args.blade_height,
+            fixed_scale=args.fixed_scale,
+            target_unit=args.unit
+        )
     else:
         print(f"Loading YOLO11 model from {model_path}...")
         try:
@@ -71,7 +81,11 @@ def main():
             
             # Analyze using spatial geometry utils
             metrics, blades, defects, unassociated = utils.analyze_detections(
-                results.boxes, results.masks, CLASS_NAMES, COLORS, width, height
+                results.boxes, results.masks, CLASS_NAMES, COLORS, width, height,
+                calibration_method=args.calib_method,
+                known_blade_height=args.blade_height,
+                fixed_scale=args.fixed_scale,
+                target_unit=args.unit
             )
             
             # Draw overlays
@@ -81,7 +95,13 @@ def main():
         except Exception as e:
             print(f"Failed to run model inference: {e}")
             print("Falling back to demo/mock inference...")
-            metrics, annotated_img = utils.run_mock_inference(img, COLORS)
+            metrics, annotated_img = utils.run_mock_inference(
+                img, COLORS,
+                calibration_method=args.calib_method,
+                known_blade_height=args.blade_height,
+                fixed_scale=args.fixed_scale,
+                target_unit=args.unit
+            )
             
     # Save the output image
     out_path = Path(args.output)
@@ -89,30 +109,38 @@ def main():
     print(f"\nSuccess: Annotated image saved to: {out_path.resolve()}")
     
     # Output metrics to console
-    print("\n" + "="*40)
-    print("        DETECTION REPORT")
-    print("="*40)
+    print("\n" + "="*45)
+    print("            DETECTION REPORT")
+    print("="*45)
     print(f"Source Image:       {img_path.name}")
     print(f"Total Blades:       {metrics['total_blades']}")
     print(f"Total Defects:      {metrics['total_defects']}")
     print(f" - Cracks:          {metrics['cracks_count']}")
     print(f" - Burns:           {metrics['burns_count']}")
-    print("-" * 40)
+    print(f"Calibration Method: {args.calib_method}")
+    print(f"Units Selected:     {args.unit} / {metrics['area_unit']}")
+    print("-" * 45)
     
     for blade in metrics["blades"]:
         print(f"Blade #{blade['blade_id']} (Conf: {blade['confidence']:.2f}) -> Status: {blade['status']}")
+        print(f"  Physical Height:  {blade['height_physical']} {metrics['length_unit']}")
+        print(f"  Physical Area:    {blade['area_physical']} {metrics['area_unit']} ({blade['area_pixels']} px)")
         if len(blade["defects"]) == 0:
             print("  No defects detected.")
         else:
             for d in blade["defects"]:
                 print(f"  - {d['type'].upper()} ({d['severity']} Severity): compromised {d['percent_compromised']}% of blade area.")
+                print(f"    Physical Area:  {d['area_physical']} {metrics['area_unit']} ({d['area_pixels']} px)")
+                print(f"    Max Dimension:  {d['max_dim_physical']} {metrics['length_unit']}")
                 
     if "unassociated_defects" in metrics and metrics["unassociated_defects"]:
-        print("-" * 40)
+        print("-" * 45)
         print("Unassociated Defects (Outside Blade Boundaries):")
         for d in metrics["unassociated_defects"]:
-            print(f"  - {d['type'].upper()} (Conf: {d['confidence']:.2f}, Area: {d['area_pixels']} px)")
-    print("="*40 + "\n")
+            print(f"  - {d['type'].upper()} (Conf: {d['confidence']:.2f})")
+            print(f"    Physical Area:  {d['area_physical']} {metrics['area_unit']} ({d['area_pixels']} px)")
+            print(f"    Max Dimension:  {d['max_dim_physical']} {metrics['length_unit']}")
+    print("="*45 + "\n")
 
 if __name__ == "__main__":
     main()

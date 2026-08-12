@@ -2,7 +2,7 @@ import os
 import shutil
 import uuid
 from pathlib import Path
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -86,7 +86,13 @@ def load_model():
         model = None
 
 @app.post("/api/upload")
-async def upload_image(file: UploadFile = File(...)):
+async def upload_image(
+    file: UploadFile = File(...),
+    calibration_method: str = Form("known_blade"),
+    known_blade_height: float = Form(100.0),
+    fixed_scale: float = Form(0.25),
+    target_unit: str = Form("mm")
+):
     global model, is_mock_mode
     # 1. Validate file extension
     ext = Path(file.filename).suffix.lower()
@@ -118,13 +124,23 @@ async def upload_image(file: UploadFile = File(...)):
     try:
         if is_mock_mode or model is None:
             # Run simulation
-            metrics, annotated_img = utils.run_mock_inference(img, COLORS)
+            metrics, annotated_img = utils.run_mock_inference(
+                img, COLORS,
+                calibration_method=calibration_method,
+                known_blade_height=known_blade_height,
+                fixed_scale=fixed_scale,
+                target_unit=target_unit
+            )
             metrics["is_mock"] = True
         else:
             # Run real YOLO inference
             results = model(str(orig_path), conf=0.25)[0]
             metrics, blades, defects, unassociated = utils.analyze_detections(
-                results.boxes, results.masks, CLASS_NAMES, COLORS, w, h
+                results.boxes, results.masks, CLASS_NAMES, COLORS, w, h,
+                calibration_method=calibration_method,
+                known_blade_height=known_blade_height,
+                fixed_scale=fixed_scale,
+                target_unit=target_unit
             )
             annotated_img = utils.draw_overlays(img, blades, defects, unassociated, COLORS)
             metrics["is_mock"] = False
